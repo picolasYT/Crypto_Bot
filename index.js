@@ -37,14 +37,14 @@ async function startBot() {
     const res = await fetch(url)
     const data = await res.json()
 
-    return `📊 Reporte Cripto\n
+    return `📊 Reporte Cripto _*CREADO POR `PICOLAS` *_\n
 🪙 Bitcoin (BTC): $${data.bitcoin.usd} (${data.bitcoin.usd_24h_change.toFixed(2)}%)
 🪙 Ethereum (ETH): $${data.ethereum.usd} (${data.ethereum.usd_24h_change.toFixed(2)}%)
 🪙 Solana (SOL): $${data.solana.usd} (${data.solana.usd_24h_change.toFixed(2)}%)`
   }
 
   // ⏰ Envío automático diario a las 16:00
-  cron.schedule("26 17 * * *", async () => {
+  cron.schedule("10 13 * * *", async () => {
     const chatId = "5492974054231@s.whatsapp.net" // 👈 tu número/grupo
     const message = await getCryptoPrices()
     await sock.sendMessage(chatId, { text: message })
