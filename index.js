@@ -37,7 +37,7 @@ async function startBot() {
     const res = await fetch(url)
     const data = await res.json()
 
-    return `📊 Reporte Cripto\n
+    return `📊 Reporte Cripto, *BOT CREADO POR PICOLAS*\n
 🪙 Bitcoin (BTC): $${data.bitcoin.usd} (${data.bitcoin.usd_24h_change.toFixed(2)}%)
 🪙 Ethereum (ETH): $${data.ethereum.usd} (${data.ethereum.usd_24h_change.toFixed(2)}%)
 🪙 Solana (SOL): $${data.solana.usd} (${data.solana.usd_24h_change.toFixed(2)}%)`
