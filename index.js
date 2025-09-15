@@ -44,7 +44,7 @@ async function startBot() {
   }
 
   // ⏰ Envío automático diario a las 16:00
-  cron.schedule("15 17 * * *", async () => {
+  cron.schedule("26 17 * * *", async () => {
     const chatId = "5492974054231@s.whatsapp.net" // 👈 tu número/grupo
     const message = await getCryptoPrices()
     await sock.sendMessage(chatId, { text: message })
