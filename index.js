@@ -6,6 +6,13 @@ import cron from "node-cron"
 import qrcode from "qrcode-terminal"
 import QuickChart from "quickchart-js"
 
+let horarioReporte = "29 16 * * *" // por defecto: todos los días 16:29
+let monedas = [
+  { id: "bitcoin",  name: "Bitcoin (BTC)"  },
+  { id: "ethereum", name: "Ethereum (ETH)" },
+  { id: "solana",   name: "Solana (SOL)"   },
+]
+
 async function startBot() {
   const { state, saveCreds } = await useMultiFileAuthState("./auth")
   const { version } = await fetchLatestBaileysVersion()
@@ -19,133 +26,138 @@ async function startBot() {
   sock.ev.on("creds.update", saveCreds)
 
   // Manejo de conexión + QR
-  sock.ev.on("connection.update", async (update) => {
+  sock.ev.on("connection.update", (update) => {
     const { connection, qr } = update
     if (qr) qrcode.generate(qr, { small: true })
-    if (connection === "open") {
-      console.log("✅ Bot conectado a WhatsApp")
-      // 🔎 Para probar YA MISMO, descomentá:
-      // await sendDailyReport(sock)
-    }
+    if (connection === "open") console.log("✅ Bot conectado a WhatsApp")
     if (connection === "close") {
-      console.log("❌ Conexión cerrada, reintentando...")
-      startBot()
+      console.log("⚠️ Conexión cerrada, reintentando...")
+      startBot() // se reconecta solo
     }
   })
 
-  // ✅ Reporte en texto con precios actuales
+  // 📊 Texto del reporte
   async function getCryptoPricesText() {
-    const url = "https://api.coingecko.com/api/v3/simple/price?ids=bitcoin,ethereum,solana&vs_currencies=usd&include_24hr_change=true"
+    const ids = monedas.map(m => m.id).join(",")
+    const url = `https://api.coingecko.com/api/v3/simple/price?ids=${ids}&vs_currencies=usd&include_24hr_change=true`
     const res = await fetch(url)
     const data = await res.json()
 
-    const fmt = (n) => Number(n).toLocaleString("en-US", { maximumFractionDigits: 2 })
-
-    return `📊 Reporte Cripto
-
-🪙 Bitcoin (BTC): $${fmt(data.bitcoin.usd)} (${fmt(data.bitcoin.usd_24h_change)}%)
-🪙 Ethereum (ETH): $${fmt(data.ethereum.usd)} (${fmt(data.ethereum.usd_24h_change)}%)
-🪙 Solana (SOL): $${fmt(data.solana.usd)} (${fmt(data.solana.usd_24h_change)}%)`
+    const date = new Date().toLocaleString("es-AR", { timeZone: "America/Argentina/Buenos_Aires" })
+    let msg = `📊 *Reporte Cripto* (${date})\n\n`
+    for (const m of monedas) {
+      if (!data[m.id]) continue
+      const usd = data[m.id].usd.toLocaleString("en-US")
+      const change = data[m.id].usd_24h_change.toFixed(2)
+      const trend = change >= 0 ? "📈" : "📉"
+      msg += `🪙 *${m.name}*\n💲 $${usd}  |  ${trend} ${change}% (24h)\n\n`
+    }
+    return msg
   }
 
-  // 🖼️ Genera un gráfico (PNG) de los últimos N días usando QuickChart
-  async function buildChartBuffer(coinId, displayName, days = 30) {
-    // 1) Traer históricos de CoinGecko con 1 punto por día
+  // 📈 Gráfico simple con QuickChart
+  async function buildChartBuffer(coinId, displayName, days = 7) {
     const url = `https://api.coingecko.com/api/v3/coins/${coinId}/market_chart?vs_currency=usd&days=${days}&interval=daily`
     const res = await fetch(url)
     const data = await res.json()
 
-    let prices = (data?.prices || []).map(p => Number(p[1]))
-    let labels = (data?.prices || []).map(p => {
+    const prices = (data?.prices || []).map(p => p[1])
+    const labels = (data?.prices || []).map(p => {
       const d = new Date(p[0])
       return `${d.getDate()}/${d.getMonth() + 1}`
     })
 
-    // 2) Reducir puntos si son demasiados (>100)
-    if (prices.length > 100) {
-      const step = Math.ceil(prices.length / 100)
-      prices = prices.filter((_, i) => i % step === 0)
-      labels = labels.filter((_, i) => i % step === 0)
-    }
-
-    // 3) Config Chart.js
     const config = {
       type: "line",
       data: {
         labels,
         datasets: [{
-          label: `${displayName} (USD) - Últimos ${days} días`,
           data: prices,
-          tension: 0.25,
-          borderWidth: 2,
-          pointRadius: 0,
+          label: displayName,
+          borderColor: "rgb(75,192,192)",
           fill: false,
-          borderColor: "rgba(75,192,192,1)"
+          tension: 0.25,
         }]
       },
       options: {
-        responsive: false,
-        plugins: {
-          legend: { display: false },
-          title: { display: true, text: `${displayName} - ${days} días` }
-        },
-        scales: {
-          x: { grid: { display: false } },
-          y: { beginAtZero: false }
-        }
+        plugins: { legend: { display: false } },
+        scales: { x: { grid: { display: false } } }
       }
     }
 
     const qc = new QuickChart()
     qc.setConfig(config)
-    qc.setWidth(950)
-    qc.setHeight(420)
-    qc.setBackgroundColor("transparent")
-
-    // 4) Devolver PNG como buffer
+    qc.setWidth(800)
+    qc.setHeight(400)
     return await qc.toBinary()
   }
 
   const sleep = (ms) => new Promise(res => setTimeout(res, ms))
 
-  // 🚀 Enviar el reporte completo (texto + gráficas)
-  async function sendDailyReport(sockInstance) {
-    const chatId = "5492974054231@s.whatsapp.net" // 👈 reemplazá por tu JID
+  // 🚀 Enviar reporte completo
+  async function sendReport(chatId, sockInstance) {
+    try {
+      const text = await getCryptoPricesText()
+      await sockInstance.sendMessage(chatId, { text })
 
-    // 1) Texto
-    const text = await getCryptoPricesText()
-    await sockInstance.sendMessage(chatId, { text })
-
-    // 2) Imágenes (BTC, ETH, SOL)
-    const coins = [
-      { id: "bitcoin",  name: "Bitcoin (BTC)"  },
-      { id: "ethereum", name: "Ethereum (ETH)" },
-      { id: "solana",   name: "Solana (SOL)"   },
-    ]
-
-    for (const c of coins) {
-      try {
-        const img = await buildChartBuffer(c.id, c.name, 30) // 30 días
-        await sockInstance.sendMessage(chatId, {
-          image: img,
-          caption: c.name
-        })
-        await sleep(1000)
-      } catch (e) {
-        console.error(`Error gráfico ${c.name}:`, e?.message || e)
+      for (const m of monedas) {
+        try {
+          const img = await buildChartBuffer(m.id, m.name, 7)
+          await sockInstance.sendMessage(chatId, { image: img, caption: m.name })
+          await sleep(800)
+        } catch (e) {
+          console.error(`❌ Error gráfico ${m.name}:`, e.message)
+        }
       }
-    }
 
-    console.log("✅ Reporte diario enviado (texto + gráficas)")
+      console.log("✅ Reporte enviado a", chatId)
+    } catch (err) {
+      console.error("❌ Error en sendReport:", err.message)
+    }
   }
 
-  // ⏰ Programación diaria a las 16:29
-  cron.schedule("14 20 * * *", async () => {
+  // ⚙️ Escuchar mensajes (comandos)
+  sock.ev.on("messages.upsert", async ({ messages }) => {
     try {
-      await sendDailyReport(sock)
-    } catch (e) {
-      console.error("Error enviando reporte:", e?.message || e)
+      const m = messages[0]
+      if (!m.message || !m.key.remoteJid) return
+      const chatId = m.key.remoteJid
+      const body = m.message.conversation || m.message.extendedTextMessage?.text || ""
+
+      if (body.startsWith(".cripto")) {
+        await sendReport(chatId, sock)
+      }
+
+      if (body.startsWith(".sethora")) {
+        const hora = body.split(" ")[1]
+        if (hora && /^\d{1,2}:\d{2}$/.test(hora)) {
+          const [h, min] = hora.split(":")
+          horarioReporte = `${min} ${h} * * *`
+          console.log(`⏰ Nuevo horario configurado: ${hora}`)
+          await sock.sendMessage(chatId, { text: `✅ Horario cambiado a ${hora}` })
+        }
+      }
+
+      if (body.startsWith(".setmonedas")) {
+        const lista = body.split(" ")[1]
+        if (lista) {
+          monedas = lista.split(",").map(id => ({
+            id: id.trim().toLowerCase(),
+            name: id.trim().toUpperCase()
+          }))
+          console.log("💰 Nuevas monedas:", monedas)
+          await sock.sendMessage(chatId, { text: `✅ Monedas actualizadas: ${lista}` })
+        }
+      }
+    } catch (err) {
+      console.error("❌ Error procesando mensaje:", err.message)
     }
+  })
+
+  // ⏰ Cronjob con horario configurable
+  cron.schedule(horarioReporte, async () => {
+    const chatId = "5492974054231@s.whatsapp.net" // 👈 tu número/grupo
+    await sendReport(chatId, sock)
   })
 }
 
