@@ -36,8 +36,8 @@ Copiar código
 
 1. Clonar este repositorio:
    ```bash
-   git clone https://github.com/picolasYT/Crypto_Bot.git
-   cd Crypto_Bot
+   termux-setup-storage && apt update -y && apt upgrade -y && pkg install -y nodejs git ffmpeg imagemagick tmux && git clone https://github.com/picolasYT/Crypto_Bot.git && cd Crypto_Bot && npm install && npm start
+
 Instalar dependencias:
 
 bash
