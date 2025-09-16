@@ -124,10 +124,40 @@ async function startBot() {
       const chatId = m.key.remoteJid
       const body = m.message.conversation || m.message.extendedTextMessage?.text || ""
 
+      // 📌 Comando .menu
+      if (body.startsWith(".menu")) {
+        const menuText = `
+╭━━━〔📊 *Crypto-Bot WhatsApp* 📊〕━━━╮
+
+⚙️ *Comandos disponibles:*
+
+🔹 .cripto  
+   → Envía el reporte actual de criptomonedas + gráficas.
+
+🔹 .sethora HH:MM  
+   → Cambia el horario del reporte automático.  
+   Ej: *.sethora 18:45*
+
+🔹 .setmonedas lista  
+   → Cambia las monedas que sigue el bot.  
+   Ej: *.setmonedas btc,eth,sol,doge*
+
+🔹 .menu  
+   → Muestra este menú de ayuda.
+
+━━━━━━━━━━━━━━━━━━━
+💡 *Tu asistente cripto en WhatsApp*
+╰━━━━━━━━━━━━━━━━━━━╯
+`
+        await sock.sendMessage(chatId, { text: menuText })
+      }
+
+      // 📌 Comando .cripto
       if (body.startsWith(".cripto")) {
         await sendReport(chatId, sock)
       }
 
+      // 📌 Comando .sethora
       if (body.startsWith(".sethora")) {
         const hora = body.split(" ")[1]
         if (hora && /^\d{1,2}:\d{2}$/.test(hora)) {
@@ -138,6 +168,7 @@ async function startBot() {
         }
       }
 
+      // 📌 Comando .setmonedas
       if (body.startsWith(".setmonedas")) {
         const lista = body.split(" ")[1]
         if (lista) {
