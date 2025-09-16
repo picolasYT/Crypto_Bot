@@ -6,12 +6,13 @@ import cron from "node-cron"
 import qrcode from "qrcode-terminal"
 import QuickChart from "quickchart-js"
 
-let horarioReporte = "29 16 * * *" // por defecto: todos los días 16:29
+let horarioReporte = "13 10 * * *" // por defecto: todos los días 13:10
 let monedas = [
   { id: "bitcoin",  name: "Bitcoin (BTC)"  },
   { id: "ethereum", name: "Ethereum (ETH)" },
   { id: "solana",   name: "Solana (SOL)"   },
 ]
+let alertas = [] // array para guardar alertas activas
 
 async function startBot() {
   const { state, saveCreds } = await useMultiFileAuthState("./auth")
@@ -32,11 +33,11 @@ async function startBot() {
     if (connection === "open") console.log("✅ Bot conectado a WhatsApp")
     if (connection === "close") {
       console.log("⚠️ Conexión cerrada, reintentando...")
-      startBot() // se reconecta solo
+      startBot()
     }
   })
 
-  // 📊 Texto del reporte
+  // 📊 Texto del reporte general
   async function getCryptoPricesText() {
     const ids = monedas.map(m => m.id).join(",")
     const url = `https://api.coingecko.com/api/v3/simple/price?ids=${ids}&vs_currencies=usd&include_24hr_change=true`
@@ -55,8 +56,12 @@ async function startBot() {
     return msg
   }
 
-  // 📈 Gráfico simple con QuickChart
-  async function buildChartBuffer(coinId, displayName, days = 7) {
+  // 📈 Gráfico dinámico con rango (1d, 7d, 30d)
+  async function buildChartBuffer(coinId, displayName, range = "7d") {
+    let days = 7
+    if (range.toLowerCase() === "1d") days = 1
+    if (range.toLowerCase() === "30d") days = 30
+
     const url = `https://api.coingecko.com/api/v3/coins/${coinId}/market_chart?vs_currency=usd&days=${days}&interval=daily`
     const res = await fetch(url)
     const data = await res.json()
@@ -73,16 +78,13 @@ async function startBot() {
         labels,
         datasets: [{
           data: prices,
-          label: displayName,
+          label: `${displayName} (${range})`,
           borderColor: "rgb(75,192,192)",
           fill: false,
           tension: 0.25,
         }]
       },
-      options: {
-        plugins: { legend: { display: false } },
-        scales: { x: { grid: { display: false } } }
-      }
+      options: { plugins: { legend: { display: false } } }
     }
 
     const qc = new QuickChart()
@@ -94,7 +96,7 @@ async function startBot() {
 
   const sleep = (ms) => new Promise(res => setTimeout(res, ms))
 
-  // 🚀 Enviar reporte completo
+  // 🚀 Enviar reporte completo (texto + gráficas)
   async function sendReport(chatId, sockInstance) {
     try {
       const text = await getCryptoPricesText()
@@ -102,7 +104,7 @@ async function startBot() {
 
       for (const m of monedas) {
         try {
-          const img = await buildChartBuffer(m.id, m.name, 7)
+          const img = await buildChartBuffer(m.id, m.name, "7d")
           await sockInstance.sendMessage(chatId, { image: img, caption: m.name })
           await sleep(800)
         } catch (e) {
@@ -124,7 +126,7 @@ async function startBot() {
       const chatId = m.key.remoteJid
       const body = m.message.conversation || m.message.extendedTextMessage?.text || ""
 
-      // 📌 Comando .menu
+      // 📌 .menu
       if (body.startsWith(".menu")) {
         const menuText = `
 ╭━━━〔📊 *Crypto-Bot WhatsApp* 📊〕━━━╮
@@ -132,18 +134,22 @@ async function startBot() {
 ⚙️ *Comandos disponibles:*
 
 🔹 .cripto  
-   → Envía el reporte actual de criptomonedas + gráficas.
+   → Reporte actual con todas las monedas.
+
+🔹 .btc 7d | .eth 30d | .sol 1d  
+   → Precio + gráfico de la moneda elegida (1d, 7d o 30d).
 
 🔹 .sethora HH:MM  
-   → Cambia el horario del reporte automático.  
-   Ej: *.sethora 18:45*
+   → Cambia el horario del reporte automático.
 
 🔹 .setmonedas lista  
-   → Cambia las monedas que sigue el bot.  
-   Ej: *.setmonedas btc,eth,sol,doge*
+   → Cambia las monedas que sigue el bot.
+
+🔹 .alerta <moneda> <precio>  
+   → Crea una alerta de precio.
 
 🔹 .menu  
-   → Muestra este menú de ayuda.
+   → Muestra este menú.
 
 ━━━━━━━━━━━━━━━━━━━
 💡 *Tu asistente cripto en WhatsApp*
@@ -152,23 +158,34 @@ async function startBot() {
         await sock.sendMessage(chatId, { text: menuText })
       }
 
-      // 📌 Comando .cripto
+      // 📌 .cripto → reporte general
       if (body.startsWith(".cripto")) {
         await sendReport(chatId, sock)
       }
 
-      // 📌 Comando .sethora
+      // 📌 .btc / .eth / .sol con rango
+      if (body.startsWith(".btc") || body.startsWith(".eth") || body.startsWith(".sol")) {
+        const args = body.split(" ")
+        const range = args[1] || "7d"
+        let coinId = "bitcoin", coinName = "Bitcoin (BTC)"
+        if (body.startsWith(".eth")) { coinId = "ethereum"; coinName = "Ethereum (ETH)" }
+        if (body.startsWith(".sol")) { coinId = "solana"; coinName = "Solana (SOL)" }
+
+        const img = await buildChartBuffer(coinId, coinName, range)
+        await sock.sendMessage(chatId, { image: img, caption: `📊 ${coinName} últimos ${range}` })
+      }
+
+      // 📌 .sethora
       if (body.startsWith(".sethora")) {
         const hora = body.split(" ")[1]
         if (hora && /^\d{1,2}:\d{2}$/.test(hora)) {
           const [h, min] = hora.split(":")
           horarioReporte = `${min} ${h} * * *`
-          console.log(`⏰ Nuevo horario configurado: ${hora}`)
           await sock.sendMessage(chatId, { text: `✅ Horario cambiado a ${hora}` })
         }
       }
 
-      // 📌 Comando .setmonedas
+      // 📌 .setmonedas
       if (body.startsWith(".setmonedas")) {
         const lista = body.split(" ")[1]
         if (lista) {
@@ -176,8 +193,20 @@ async function startBot() {
             id: id.trim().toLowerCase(),
             name: id.trim().toUpperCase()
           }))
-          console.log("💰 Nuevas monedas:", monedas)
           await sock.sendMessage(chatId, { text: `✅ Monedas actualizadas: ${lista}` })
+        }
+      }
+
+      // 📌 .alerta
+      if (body.startsWith(".alerta")) {
+        const args = body.split(" ")
+        const coin = args[1]?.toLowerCase()
+        const price = parseFloat(args[2])
+        if (!coin || isNaN(price)) {
+          await sock.sendMessage(chatId, { text: "⚠️ Uso: .alerta <moneda> <precio>\nEj: .alerta btc 30000" })
+        } else {
+          alertas.push({ chatId, coin, price })
+          await sock.sendMessage(chatId, { text: `✅ Alerta creada para ${coin.toUpperCase()} en $${price}` })
         }
       }
     } catch (err) {
@@ -187,8 +216,26 @@ async function startBot() {
 
   // ⏰ Cronjob con horario configurable
   cron.schedule(horarioReporte, async () => {
-    const chatId = "5492974054231@s.whatsapp.net" // 👈 tu número/grupo
+    const chatId = "5492974054231@s.whatsapp.net" // tu número/grupo
     await sendReport(chatId, sock)
+  })
+
+  // 🚨 Chequeo de alertas cada 5 minutos
+  cron.schedule("*/5 * * * *", async () => {
+    if (alertas.length === 0) return
+    const ids = [...new Set(alertas.map(a => a.coin))].join(",")
+    const url = `https://api.coingecko.com/api/v3/simple/price?ids=${ids}&vs_currencies=usd`
+    const res = await fetch(url)
+    const data = await res.json()
+
+    for (const alerta of [...alertas]) {
+      const current = data[alerta.coin]?.usd
+      if (!current) continue
+      if (current <= alerta.price) {
+        await sock.sendMessage(alerta.chatId, { text: `🚨 ALERTA: ${alerta.coin.toUpperCase()} bajó a $${current} (límite: ${alerta.price})` })
+        alertas = alertas.filter(a => a !== alerta) // borrar alerta disparada
+      }
+    }
   })
 }
 
