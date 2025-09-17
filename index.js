@@ -7,23 +7,23 @@ import qrcode from "qrcode-terminal"
 import QuickChart from "quickchart-js"
 import { exec } from "child_process"
 
-/* ====== CONFIG ====== */
-const OWNER = "5492974054231@s.whatsapp.net"   // <- TU JID
+/* ===== CONFIG ===== */
+const OWNER = "5492974054231@s.whatsapp.net"
 const TIMEZONE = "America/Argentina/Buenos_Aires"
 const BRAND = "☆ {ℙ𝕚𝕔𝕠𝕝𝕒𝕤-𝐌𝐃} ☆"
-/* ==================== */
+/* ================== */
 
 let monedas = [
-  { id: "bitcoin",  name: "Bitcoin (BTC)"  },
+  { id: "bitcoin", name: "Bitcoin (BTC)" },
   { id: "ethereum", name: "Ethereum (ETH)" },
-  { id: "solana",   name: "Solana (SOL)"   },
+  { id: "solana", name: "Solana (SOL)" },
 ]
 
 let alertas = []
-let reportTask = null         // referencia al cron para reprogramar
-let horarioReporte = "29 16 * * *" // por defecto 16:29 todos los días
+let reportTask = null
+let horarioReporte = "29 16 * * *"
 
-// alias comunes -> ids de CoinGecko
+// alias comunes
 const ID_ALIAS = {
   btc: "bitcoin",
   eth: "ethereum",
@@ -40,7 +40,7 @@ async function startBot() {
   const sock = makeWASocket({
     logger: P({ level: "silent" }),
     auth: state,
-    version
+    version,
   })
   sock.ev.on("creds.update", saveCreds)
 
@@ -59,60 +59,55 @@ async function startBot() {
 
   /* =============== Utils =============== */
   const getTextFromMessage = (m) =>
-    m?.message?.conversation
-    || m?.message?.extendedTextMessage?.text
-    || m?.message?.imageMessage?.caption
-    || m?.message?.videoMessage?.caption
-    || ""
-
-  const sleep = (ms) => new Promise(r => setTimeout(r, ms))
+    m?.message?.conversation ||
+    m?.message?.extendedTextMessage?.text ||
+    m?.message?.imageMessage?.caption ||
+    m?.message?.videoMessage?.caption ||
+    ""
 
   function scheduleReport(expr, sockInstance) {
-    try {
-      if (reportTask) reportTask.stop()
-      reportTask = cron.schedule(expr, async () => {
+    if (reportTask) reportTask.stop()
+    reportTask = cron.schedule(
+      expr,
+      async () => {
         await sendReport(OWNER, sockInstance)
-      }, { timezone: TIMEZONE })
-      console.log("⏰ Cron reprogramado:", expr, `(${TIMEZONE})`)
-    } catch (e) {
-      console.error("❌ Error programando cron:", e.message)
-    }
+      },
+      { timezone: TIMEZONE }
+    )
+    console.log("⏰ Cron reprogramado:", expr, `(${TIMEZONE})`)
   }
+
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
   /* ==================================== */
 
-  // Texto del reporte (look más moderno + créditos)
+  // 📊 Reporte en texto
   async function getCryptoPricesText() {
-    const ids = monedas.map(m => m.id).join(",")
+    const ids = monedas.map((m) => m.id).join(",")
     const url = `https://api.coingecko.com/api/v3/simple/price?ids=${ids}&vs_currencies=usd&include_24hr_change=true`
     const res = await fetch(url)
     const data = await res.json()
 
     const date = new Date().toLocaleString("es-AR", { timeZone: TIMEZONE })
-    let msg = `╭─────────────────────╮
-│  📊 *Reporte Cripto*  │
-╰─────────────────────╯
-🕒 ${date}\n\n`
-
+    let msg = `📊 *Reporte Cripto* (${date})\n\n`
     for (const m of monedas) {
       if (!data[m.id]) continue
       const usd = Number(data[m.id].usd).toLocaleString("en-US")
       const chg = Number(data[m.id].usd_24h_change).toFixed(2)
       const trend = chg >= 0 ? "📈" : "📉"
-      msg += `💠 *${m.name}*\n   💵 $${usd}  |  ${trend} ${chg}% (24h)\n\n`
+      msg += `${m.name.padEnd(14)} $${usd}  |  ${trend} ${chg}% (24h)\n`
     }
-
-    msg += `━━━━━━━━━━━━━━━━━━━\n${BRAND}\n`
+    msg += `\n━━━━━━━━━━━━━━━━━━━━━━\n      el credito\n  ${BRAND}\n━━━━━━━━━━━━━━━━━━━━━━`
     return msg
   }
 
-  // Gráfico simple (versión estable)
+  // 📈 Gráfico simple
   async function buildChartBuffer(coinId, displayName, days = 7) {
     const url = `https://api.coingecko.com/api/v3/coins/${coinId}/market_chart?vs_currency=usd&days=${days}&interval=daily`
     const res = await fetch(url)
     const data = await res.json()
 
-    const prices = (data?.prices || []).map(p => p[1])
-    const labels = (data?.prices || []).map(p => {
+    const prices = (data?.prices || []).map((p) => p[1])
+    const labels = (data?.prices || []).map((p) => {
       const d = new Date(p[0])
       return `${d.getDate()}/${d.getMonth() + 1}`
     })
@@ -121,15 +116,17 @@ async function startBot() {
       type: "line",
       data: {
         labels,
-        datasets: [{
-          data: prices,
-          label: displayName,
-          borderColor: "rgb(75,192,192)",
-          fill: false,
-          tension: 0.25,
-        }]
+        datasets: [
+          {
+            data: prices,
+            label: displayName,
+            borderColor: "rgb(75,192,192)",
+            fill: false,
+            tension: 0.25,
+          },
+        ],
       },
-      options: { plugins: { legend: { display: false } } }
+      options: { plugins: { legend: { display: false } } },
     }
 
     const qc = new QuickChart()
@@ -139,139 +136,155 @@ async function startBot() {
     return await qc.toBinary()
   }
 
-  // Envío de reporte completo
+  // 🚀 Enviar reporte completo
   async function sendReport(chatId, sockInstance) {
-    try {
-      const text = await getCryptoPricesText()
-      await sockInstance.sendMessage(chatId, { text })
+    const text = await getCryptoPricesText()
+    await sockInstance.sendMessage(chatId, { text })
 
-      for (const m of monedas) {
-        try {
-          const img = await buildChartBuffer(m.id, m.name, 7)
-          await sockInstance.sendMessage(chatId, { image: img, caption: m.name })
-          await sleep(700)
-        } catch (e) {
-          console.error(`❌ Error gráfico ${m.name}:`, e.message)
-        }
+    for (const m of monedas) {
+      try {
+        const img = await buildChartBuffer(m.id, m.name, 7)
+        await sockInstance.sendMessage(chatId, {
+          image: img,
+          caption: m.name,
+        })
+        await sleep(800)
+      } catch (e) {
+        console.error(`❌ Error gráfico ${m.name}:`, e.message)
       }
-      console.log("✅ Reporte enviado a", chatId)
-    } catch (err) {
-      console.error("❌ Error en sendReport:", err.message)
     }
   }
 
-  // Comandos
+  // ⚙️ Comandos
   sock.ev.on("messages.upsert", async ({ messages }) => {
     try {
       const m = messages[0]
       const chatId = m?.key?.remoteJid
       if (!chatId) return
-      const bodyRaw = getTextFromMessage(m)
-      const body = bodyRaw.trim()
-
-      // normalizar
+      const body = getTextFromMessage(m).trim()
       const cmd = body.split(/\s+/)[0].toLowerCase()
 
-      // .menu
-      if (cmd === ".menu" || cmd === ".help") {
+      /* ===== MENÚ ===== */
+      if (cmd === ".menu") {
         const menuText = `
-╭━━━〔📊 *Crypto-Bot WhatsApp* 📊〕━━━╮
+╭━━━〔 📊 Crypto-Bot WhatsApp 〕━━━╮
 
-⚙️ *Comandos disponibles:*
-• .cripto → Reporte general
-• .sethora HH:MM → Cambia el horario automático
-• .setmonedas lista → e.g. ".setmonedas btc,eth,sol"
-• .alerta <moneda> <precio> → e.g. ".alerta btc 30000"
-• .update / .restart → Solo admin
-• .menu → Este menú
+.cripto        Ver reporte general
+               Ej: .cripto
 
-━━━━━━━━━━━━━━━━━━━
-${BRAND}
+.precio        Precio rápido de una moneda
+               Ej: .precio btc
+
+.sethora       Cambiar horario del reporte
+               Ej: .sethora 18:45
+
+.setmonedas    Actualizar monedas seguidas
+               Ej: .setmonedas btc,eth,sol
+
+.alerta        Crear alerta de precio
+               Ej: .alerta btc 30000
+
+.alertas       Listar alertas activas
+.deletealerta  Eliminar alerta de una moneda
+               Ej: .deletealerta btc
+
+.ping          Test de conexión
+.update        Actualizar el bot (solo admin)
+.restart       Reiniciar el bot (solo admin)
+
+━━━━━━━━━━━━━━━━━━━━━━
+📌 Siguiendo: ${monedas.length} monedas
+🔔 Alertas activas: ${alertas.length}
+━━━━━━━━━━━━━━━━━━━━━━
+        el credito
+  ${BRAND}
+━━━━━━━━━━━━━━━━━━━━━━
 `
         await sock.sendMessage(chatId, { text: menuText })
         return
       }
 
-      // .cripto
-      if (cmd === ".cripto") {
-        await sendReport(chatId, sock)
+      /* ===== COMANDOS ===== */
+      if (cmd === ".cripto") return await sendReport(chatId, sock)
+
+      if (cmd === ".precio") {
+        const coinArg = body.split(/\s+/)[1]?.toLowerCase()
+        const id = ID_ALIAS[coinArg] || coinArg
+        if (!id) return await sock.sendMessage(chatId, { text: "⚠️ Uso: .precio <moneda>\nEj: .precio btc" })
+
+        const url = `https://api.coingecko.com/api/v3/simple/price?ids=${id}&vs_currencies=usd&include_24hr_change=true`
+        const res = await fetch(url)
+        const data = await res.json()
+        if (!data[id]) return await sock.sendMessage(chatId, { text: `❌ No se encontró info para ${coinArg}` })
+
+        const usd = data[id].usd.toLocaleString("en-US")
+        const chg = data[id].usd_24h_change.toFixed(2)
+        const trend = chg >= 0 ? "📈" : "📉"
+        await sock.sendMessage(chatId, { text: `💰 ${coinArg.toUpperCase()} → $${usd} | ${trend} ${chg}% (24h)` })
         return
       }
 
-      // .sethora HH:MM  (reprograma *de verdad*)
       if (cmd === ".sethora") {
         const hhmm = body.split(/\s+/)[1]
-        if (!/^\d{1,2}:\d{2}$/.test(hhmm)) {
-          await sock.sendMessage(chatId, { text: "⚠️ Uso: *.sethora HH:MM*\nEj: *.sethora 18:45*" })
-          return
-        }
-        const [hStr, mStr] = hhmm.split(":")
-        const h = Number(hStr), mi = Number(mStr)
-        if (h > 23 || mi > 59) {
-          await sock.sendMessage(chatId, { text: "⚠️ Hora inválida. Usa formato 00–23:00–59." })
-          return
-        }
+        if (!/^\d{1,2}:\d{2}$/.test(hhmm)) return await sock.sendMessage(chatId, { text: "⚠️ Uso: .sethora HH:MM" })
+        const [h, mi] = hhmm.split(":")
         horarioReporte = `${mi} ${h} * * *`
         scheduleReport(horarioReporte, sock)
-        await sock.sendMessage(chatId, { text: `✅ Horario cambiado a *${hhmm}* (${TIMEZONE})` })
-        return
+        return await sock.sendMessage(chatId, { text: `✅ Horario cambiado a ${hhmm}` })
       }
 
-      // .setmonedas <lista>
       if (cmd === ".setmonedas") {
         const listStr = body.replace(/^\.setmonedas\s+/i, "")
-        if (!listStr) {
-          await sock.sendMessage(chatId, { text: "⚠️ Uso: *.setmonedas btc,eth,sol*" })
-          return
-        }
-        const ids = [...new Set(listStr.split(/[,\s]+/).filter(Boolean).map(x => ID_ALIAS[x.toLowerCase()] || x.toLowerCase()))]
-        if (ids.length === 0) {
-          await sock.sendMessage(chatId, { text: "⚠️ No se detectaron monedas." })
-          return
-        }
-        monedas = ids.map(id => {
-          const sym = Object.keys(ID_ALIAS).find(k => ID_ALIAS[k] === id)
-          const tag = sym ? sym.toUpperCase() : id.toUpperCase()
-          return { id, name: `${tag}` }
-        })
-        await sock.sendMessage(chatId, { text: `✅ Monedas actualizadas: ${ids.join(", ")}` })
-        return
+        const ids = listStr.split(/[,\s]+/).filter(Boolean).map((x) => ID_ALIAS[x.toLowerCase()] || x.toLowerCase())
+        monedas = ids.map((id) => ({ id, name: id.toUpperCase() }))
+        return await sock.sendMessage(chatId, { text: `✅ Monedas actualizadas: ${ids.join(", ")}` })
       }
 
-      // .alerta <moneda> <precio>
       if (cmd === ".alerta") {
-        const parts = body.split(/\s+/)
-        const coinArg = (parts[1] || "").toLowerCase()
-        const price = parseFloat(parts[2])
+        const [_, coinArg, priceStr] = body.split(/\s+/)
         const id = ID_ALIAS[coinArg] || coinArg
-        if (!id || Number.isNaN(price)) {
-          await sock.sendMessage(chatId, { text: "⚠️ Uso: *.alerta <moneda> <precio>*\nEj: *.alerta btc 30000*" })
-          return
-        }
+        const price = parseFloat(priceStr)
+        if (!id || isNaN(price)) return await sock.sendMessage(chatId, { text: "⚠️ Uso: .alerta <moneda> <precio>" })
         alertas.push({ chatId, coin: id, price })
-        await sock.sendMessage(chatId, { text: `✅ Alerta creada para *${coinArg.toUpperCase()}* en $${price}` })
-        return
+        return await sock.sendMessage(chatId, { text: `✅ Alerta creada para ${coinArg.toUpperCase()} en $${price}` })
       }
 
-      // ADMIN ONLY
+      if (cmd === ".alertas") {
+        if (alertas.length === 0) return await sock.sendMessage(chatId, { text: "🔔 No tenés alertas activas." })
+        let txt = "🔔 *Alertas activas:*\n\n"
+        alertas.forEach((a, i) => {
+          txt += `${i + 1}. ${a.coin.toUpperCase()} → $${a.price}\n`
+        })
+        return await sock.sendMessage(chatId, { text: txt })
+      }
+
+      if (cmd === ".deletealerta") {
+        const coinArg = body.split(/\s+/)[1]?.toLowerCase()
+        if (!coinArg) return await sock.sendMessage(chatId, { text: "⚠️ Uso: .deletealerta <moneda>" })
+        const id = ID_ALIAS[coinArg] || coinArg
+        const before = alertas.length
+        alertas = alertas.filter((a) => a.coin !== id)
+        const diff = before - alertas.length
+        return await sock.sendMessage(chatId, { text: diff > 0 ? `✅ Alerta(s) de ${coinArg.toUpperCase()} eliminada(s).` : `❌ No había alertas de ${coinArg.toUpperCase()}.` })
+      }
+
+      if (cmd === ".ping") {
+        return await sock.sendMessage(chatId, { text: "🏓 Pong! ✅" })
+      }
+
+      // Solo OWNER
       const sender = m?.key?.participant || chatId
       const isOwner = sender === OWNER || chatId === OWNER
 
-      // .update
       if (cmd === ".update" && isOwner) {
         await sock.sendMessage(chatId, { text: "⏳ Actualizando bot desde GitHub..." })
-        exec("git pull && npm install", (error, stdout, stderr) => {
-          if (error) {
-            sock.sendMessage(chatId, { text: `❌ Error:\n${error.message}` })
-            return
-          }
-          sock.sendMessage(chatId, { text: `✅ Update completo:\n${stdout || "OK"}` })
-          process.exit(0) // reinicia
+        exec("git pull && npm install", (error, stdout) => {
+          if (error) return sock.sendMessage(chatId, { text: `❌ Error:\n${error.message}` })
+          sock.sendMessage(chatId, { text: `✅ Update completo:\n${stdout}` })
+          process.exit(0)
         })
-        return
       }
 
-      // .restart
       if (cmd === ".restart" && isOwner) {
         await sock.sendMessage(chatId, { text: "♻️ Reiniciando bot..." })
         process.exit(0)
@@ -281,10 +294,10 @@ ${BRAND}
     }
   })
 
-  // Chequeo de alertas cada 5 minutos
+  // 🚨 Chequeo de alertas cada 5 min
   cron.schedule("*/5 * * * *", async () => {
     if (alertas.length === 0) return
-    const ids = [...new Set(alertas.map(a => a.coin))].join(",")
+    const ids = [...new Set(alertas.map((a) => a.coin))].join(",")
     const url = `https://api.coingecko.com/api/v3/simple/price?ids=${ids}&vs_currencies=usd`
     const res = await fetch(url)
     const data = await res.json()
@@ -293,8 +306,8 @@ ${BRAND}
       const current = data[alerta.coin]?.usd
       if (!current) continue
       if (current <= alerta.price) {
-        await sock.sendMessage(alerta.chatId, { text: `🚨 ALERTA: *${alerta.coin.toUpperCase()}* bajó a *$${current}* (límite: $${alerta.price})` })
-        alertas = alertas.filter(a => a !== alerta)
+        await sock.sendMessage(alerta.chatId, { text: `🚨 ALERTA: ${alerta.coin.toUpperCase()} bajó a $${current} (límite $${alerta.price})` })
+        alertas = alertas.filter((a) => a !== alerta)
       }
     }
   })
