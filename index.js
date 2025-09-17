@@ -5,14 +5,16 @@ import fetch from "node-fetch"
 import cron from "node-cron"
 import qrcode from "qrcode-terminal"
 import QuickChart from "quickchart-js"
+import { exec } from "child_process"
 
-let horarioReporte = "13 10 * * *" // por defecto: todos los días 13:10
+let horarioReporte = "29 16 * * *" // por defecto: todos los días 16:29
 let monedas = [
   { id: "bitcoin",  name: "Bitcoin (BTC)"  },
   { id: "ethereum", name: "Ethereum (ETH)" },
   { id: "solana",   name: "Solana (SOL)"   },
 ]
-let alertas = [] // array para guardar alertas activas
+let alertas = [] // lista de alertas activas
+const OWNER = "5492974054231@s.whatsapp.net" // 👈 solo este número puede usar .update y .restart
 
 async function startBot() {
   const { state, saveCreds } = await useMultiFileAuthState("./auth")
@@ -37,7 +39,7 @@ async function startBot() {
     }
   })
 
-  // 📊 Texto del reporte general
+  // 📊 Reporte general en texto
   async function getCryptoPricesText() {
     const ids = monedas.map(m => m.id).join(",")
     const url = `https://api.coingecko.com/api/v3/simple/price?ids=${ids}&vs_currencies=usd&include_24hr_change=true`
@@ -56,20 +58,28 @@ async function startBot() {
     return msg
   }
 
-  // 📈 Gráfico dinámico con rango (1d, 7d, 30d)
+  // 📈 Generar gráfico con rango dinámico (1d, 7d, 30d, 100d)
   async function buildChartBuffer(coinId, displayName, range = "7d") {
     let days = 7
-    if (range.toLowerCase() === "1d") days = 1
-    if (range.toLowerCase() === "30d") days = 30
+    let interval = "daily"
 
-    const url = `https://api.coingecko.com/api/v3/coins/${coinId}/market_chart?vs_currency=usd&days=${days}&interval=daily`
+    if (range.toLowerCase().endsWith("d")) {
+      days = parseInt(range)
+    }
+
+    if (days <= 7) interval = "hourly"
+    else interval = "daily"
+
+    const url = `https://api.coingecko.com/api/v3/coins/${coinId}/market_chart?vs_currency=usd&days=${days}&interval=${interval}`
     const res = await fetch(url)
     const data = await res.json()
 
     const prices = (data?.prices || []).map(p => p[1])
     const labels = (data?.prices || []).map(p => {
       const d = new Date(p[0])
-      return `${d.getDate()}/${d.getMonth() + 1}`
+      return days <= 7
+        ? `${d.getDate()}/${d.getMonth() + 1} ${d.getHours()}:00`
+        : `${d.getDate()}/${d.getMonth() + 1}`
     })
 
     const config = {
@@ -133,23 +143,16 @@ async function startBot() {
 
 ⚙️ *Comandos disponibles:*
 
-🔹 .cripto  
-   → Reporte actual con todas las monedas.
-
-🔹 .btc 7d | .eth 30d | .sol 1d  
-   → Precio + gráfico de la moneda elegida (1d, 7d o 30d).
-
-🔹 .sethora HH:MM  
-   → Cambia el horario del reporte automático.
-
-🔹 .setmonedas lista  
-   → Cambia las monedas que sigue el bot.
-
-🔹 .alerta <moneda> <precio>  
-   → Crea una alerta de precio.
-
-🔹 .menu  
-   → Muestra este menú.
+🔹 .cripto → Reporte general con todas las monedas
+🔹 .btc 1d / 7d / 30d / 100d → Precio + gráfico BTC
+🔹 .eth 1d / 7d / 30d → Precio + gráfico ETH
+🔹 .sol 1d / 7d / 30d → Precio + gráfico SOL
+🔹 .sethora HH:MM → Cambia el horario del reporte automático
+🔹 .setmonedas lista → Cambia las monedas que sigue el bot
+🔹 .alerta <moneda> <precio> → Crea una alerta de precio
+🔹 .update → Actualiza el bot desde GitHub (solo admin)
+🔹 .restart → Reinicia el bot (solo admin)
+🔹 .menu → Muestra este menú
 
 ━━━━━━━━━━━━━━━━━━━
 💡 *Tu asistente cripto en WhatsApp*
@@ -158,7 +161,7 @@ async function startBot() {
         await sock.sendMessage(chatId, { text: menuText })
       }
 
-      // 📌 .cripto → reporte general
+      // 📌 .cripto
       if (body.startsWith(".cripto")) {
         await sendReport(chatId, sock)
       }
@@ -209,6 +212,26 @@ async function startBot() {
           await sock.sendMessage(chatId, { text: `✅ Alerta creada para ${coin.toUpperCase()} en $${price}` })
         }
       }
+
+      // 📌 .update (solo OWNER)
+      if (body.startsWith(".update") && chatId === OWNER) {
+        await sock.sendMessage(chatId, { text: "⏳ Actualizando bot desde GitHub..." })
+        exec("git pull && npm install", (error, stdout, stderr) => {
+          if (error) {
+            sock.sendMessage(chatId, { text: `❌ Error:\n${error.message}` })
+            return
+          }
+          sock.sendMessage(chatId, { text: `✅ Update completo:\n${stdout}` })
+          process.exit(0) // reinicia bot
+        })
+      }
+
+      // 📌 .restart (solo OWNER)
+      if (body.startsWith(".restart") && chatId === OWNER) {
+        await sock.sendMessage(chatId, { text: "♻️ Reiniciando bot..." })
+        process.exit(0)
+      }
+
     } catch (err) {
       console.error("❌ Error procesando mensaje:", err.message)
     }
@@ -216,7 +239,7 @@ async function startBot() {
 
   // ⏰ Cronjob con horario configurable
   cron.schedule(horarioReporte, async () => {
-    const chatId = "5492974054231@s.whatsapp.net" // tu número/grupo
+    const chatId = OWNER // 👈 envío automático solo al dueño
     await sendReport(chatId, sock)
   })
 
@@ -233,7 +256,7 @@ async function startBot() {
       if (!current) continue
       if (current <= alerta.price) {
         await sock.sendMessage(alerta.chatId, { text: `🚨 ALERTA: ${alerta.coin.toUpperCase()} bajó a $${current} (límite: ${alerta.price})` })
-        alertas = alertas.filter(a => a !== alerta) // borrar alerta disparada
+        alertas = alertas.filter(a => a !== alerta)
       }
     }
   })
