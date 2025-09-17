@@ -14,7 +14,7 @@ let monedas = [
   { id: "solana",   name: "Solana (SOL)"   },
 ]
 let alertas = [] // lista de alertas activas
-const OWNER = "5492974054231@s.whatsapp.net" // 👈 solo este número puede usar .update y .restart
+const OWNER = "5492974054231@s.whatsapp.net" // 👈 tu número, solo vos podés usar .update y .restart
 
 async function startBot() {
   const { state, saveCreds } = await useMultiFileAuthState("./auth")
@@ -58,7 +58,7 @@ async function startBot() {
     return msg
   }
 
-  // 📈 Generar gráfico con rango dinámico (1d, 7d, 30d, 100d)
+  // 📈 Generar gráfico con rango dinámico
   async function buildChartBuffer(coinId, displayName, range = "7d") {
     let days = 7
     let interval = "daily"
@@ -67,6 +67,7 @@ async function startBot() {
       days = parseInt(range)
     }
 
+    // usar hourly en rangos cortos
     if (days <= 7) interval = "hourly"
     else interval = "daily"
 
@@ -94,7 +95,15 @@ async function startBot() {
           tension: 0.25,
         }]
       },
-      options: { plugins: { legend: { display: false } } }
+      options: {
+        plugins: { legend: { display: false } },
+        scales: {
+          y: {
+            beginAtZero: false, // no empieza en 0 → evita gráfico plano
+            ticks: { callback: v => "$" + v.toLocaleString() }
+          }
+        }
+      }
     }
 
     const qc = new QuickChart()
@@ -138,28 +147,29 @@ async function startBot() {
 
       // 📌 .menu
       if (body.startsWith(".menu")) {
-        const menuText = `
+  const menuText = `
 ╭━━━〔📊 *Crypto-Bot WhatsApp* 📊〕━━━╮
 
 ⚙️ *Comandos disponibles:*
 
-🔹 .cripto → Reporte general con todas las monedas
+🔹 .cripto → Reporte general
 🔹 .btc 1d / 7d / 30d / 100d → Precio + gráfico BTC
 🔹 .eth 1d / 7d / 30d → Precio + gráfico ETH
 🔹 .sol 1d / 7d / 30d → Precio + gráfico SOL
-🔹 .sethora HH:MM → Cambia el horario del reporte automático
-🔹 .setmonedas lista → Cambia las monedas que sigue el bot
-🔹 .alerta <moneda> <precio> → Crea una alerta de precio
-🔹 .update → Actualiza el bot desde GitHub (solo admin)
-🔹 .restart → Reinicia el bot (solo admin)
-🔹 .menu → Muestra este menú
+🔹 .sethora HH:MM → Cambia el horario automático
+🔹 .setmonedas lista → Cambia monedas seguidas
+🔹 .alerta <moneda> <precio> → Crea alerta
+🔹 .update → Actualiza bot desde GitHub (solo admin)
+🔹 .restart → Reinicia bot (solo admin)
+🔹 .menu → Este menú
 
 ━━━━━━━━━━━━━━━━━━━
 💡 *Tu asistente cripto en WhatsApp*
-╰━━━━━━━━━━━━━━━━━━━╯
+━━━━━━━━━━━━━━━━━━━
+☆ {ℙ𝕚𝕔𝕠𝕝𝕒𝕤-𝐌𝐃} ☆
 `
-        await sock.sendMessage(chatId, { text: menuText })
-      }
+  await sock.sendMessage(chatId, { text: menuText })
+}
 
       // 📌 .cripto
       if (body.startsWith(".cripto")) {
@@ -239,7 +249,7 @@ async function startBot() {
 
   // ⏰ Cronjob con horario configurable
   cron.schedule(horarioReporte, async () => {
-    const chatId = OWNER // 👈 envío automático solo al dueño
+    const chatId = OWNER
     await sendReport(chatId, sock)
   })
 
