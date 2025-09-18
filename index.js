@@ -191,6 +191,9 @@ async function startBot() {
 .tiktok        Descargar video de TikTok
                Ej: .tiktok https://www.tiktok.com/...
 
+.yt            Descargar video de YouTube
+               Ej: .yt https://youtu.be/abc123
+
 .ping          Test de conexión
 .update        Actualizar el bot (solo admin)
 .restart       Reiniciar el bot (solo admin)
@@ -291,6 +294,22 @@ async function startBot() {
         }
       }
 
+      if (cmd === ".yt") {
+        const urlYt = body.split(/\s+/)[1]
+        if (!urlYt) return await sock.sendMessage(chatId, { text: "⚠️ Uso: .yt <url>" })
+        try {
+          const api = `https://api.akuari.my.id/downloader/youtube?url=${encodeURIComponent(urlYt)}`
+          const res = await fetch(api)
+          const data = await res.json()
+          if (!data?.video || !data.video[0]?.url) return await sock.sendMessage(chatId, { text: "❌ No pude descargar el video de YouTube." })
+          const videoUrl = data.video[0].url
+          await sock.sendMessage(chatId, { video: { url: videoUrl }, caption: "📥 Video de YouTube descargado ✅" })
+        } catch (err) {
+          console.error("❌ Error YouTube:", err.message)
+          await sock.sendMessage(chatId, { text: "❌ Error al descargar el video de YouTube." })
+        }
+      }
+
       // Solo OWNER
       const sender = m?.key?.participant || chatId
       const isOwner = sender === OWNER || chatId === OWNER
@@ -298,8 +317,18 @@ async function startBot() {
       if (cmd === ".update" && isOwner) {
         await sock.sendMessage(chatId, { text: "⏳ Actualizando bot desde GitHub..." })
         exec("git pull && npm install", (error, stdout) => {
-          if (error) return sock.sendMessage(chatId, { text: `❌ Error:\n${error.message}` })
-          sock.sendMessage(chatId, { text: `✅ Update completo:\n${stdout}` })
+          if (error) {
+            sock.sendMessage(chatId, { text: `❌ Error en update:\n${error.message}` })
+            return
+          }
+          sock.sendMessage(chatId, { text: `✅ Update completo:\n${stdout || "OK"}` })
+
+          // Reiniciar con npm start
+          exec("npm start", (err, out) => {
+            if (err) console.error("❌ Error al reiniciar:", err.message)
+            console.log(out || "Bot reiniciado con npm start ✅")
+          })
+
           process.exit(0)
         })
       }
