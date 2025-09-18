@@ -188,6 +188,9 @@ async function startBot() {
 .deletealerta  Eliminar alerta de una moneda
                Ej: .deletealerta btc
 
+.tiktok        Descargar video de TikTok
+               Ej: .tiktok https://www.tiktok.com/...
+
 .ping          Test de conexión
 .update        Actualizar el bot (solo admin)
 .restart       Reiniciar el bot (solo admin)
@@ -270,6 +273,22 @@ async function startBot() {
 
       if (cmd === ".ping") {
         return await sock.sendMessage(chatId, { text: "🏓 Pong! ✅" })
+      }
+
+      if (cmd === ".tiktok") {
+        const urlTik = body.split(/\s+/)[1]
+        if (!urlTik) return await sock.sendMessage(chatId, { text: "⚠️ Uso: .tiktok <url>" })
+        try {
+          const api = `https://tikwm.com/api/?url=${encodeURIComponent(urlTik)}`
+          const res = await fetch(api)
+          const data = await res.json()
+          if (!data?.data?.play) return await sock.sendMessage(chatId, { text: "❌ No pude descargar el video." })
+          const videoUrl = data.data.play
+          await sock.sendMessage(chatId, { video: { url: videoUrl }, caption: "📥 Video de TikTok descargado ✅" })
+        } catch (err) {
+          console.error("❌ Error TikTok:", err.message)
+          await sock.sendMessage(chatId, { text: "❌ Error al descargar el video." })
+        }
       }
 
       // Solo OWNER
